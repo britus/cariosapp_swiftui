@@ -141,7 +141,7 @@ struct PowerView: View {
             }
         }
         .refreshable { await store.refreshAll() }
-        .serverConnectionOverlay()
+        .serverConnectionOverlay(remoteDataType: "p")
     }
 }
 
@@ -157,11 +157,17 @@ struct ChargerView: View {
                     ("sys.bat.i", "Battery Current"),
                     ("sys.bat.p", "Battery Power")
                 ])
-                ChargerRelayToggle(title: "Relay 1", value: store.charger.values["sys.r1"]) {
-                    store.toggleChargerRelay(mode: 1)
+                ChargerRelayToggle(
+                    title: "Relay 1",
+                    value: store.charger.values["sys.r1"]
+                ) { state in
+                    store.setChargerRelay(mode: 1, state: state)
                 }
-                ChargerRelayToggle(title: "Relay 2", value: store.charger.values["sys.r2"]) {
-                    store.toggleChargerRelay(mode: 2)
+                ChargerRelayToggle(
+                    title: "Relay 2",
+                    value: store.charger.values["sys.r2"]
+                ) { state in
+                    store.setChargerRelay(mode: 2, state: state)
                 }
             }
             Section("AC/DC Charger") {
@@ -191,7 +197,7 @@ struct ChargerView: View {
             }
         }
         .refreshable { await store.loadCharger() }
-        .serverConnectionOverlay()
+        .serverConnectionOverlay(remoteDataType: "c")
     }
 }
 
@@ -209,8 +215,8 @@ struct NetworkView: View {
             Section("CarIOS Network") {
                 LabeledContent("LAN IP", value: store.network.lanIp)
                 LabeledContent("WiFi AP IP", value: store.network.wifiApIp)
-                NetworkStatusRow(title: "WiFi WAN IP", value: store.network.wifiWanIp, isAvailable: wifiWanAvailable)
-                NetworkStatusRow(title: "Mobile WAN IP", value: store.network.gsmWanIp, isAvailable: mobileWanAvailable)
+                NetworkStatusRow(title: "WiFi WAN", value: store.network.wifiWanIp, isAvailable: wifiWanAvailable)
+                NetworkStatusRow(title: "Mobile WAN", value: store.network.gsmWanIp, isAvailable: mobileWanAvailable)
                 NetworkStatusRow(title: "Gateway IP", value: store.network.gatewayIp, isAvailable: gatewayAvailable)
                 LabeledContent("Service URL", value: store.network.serviceUrl)
             }
@@ -221,7 +227,7 @@ struct NetworkView: View {
             }
         }
         .refreshable { await store.loadNetwork() }
-        .serverConnectionOverlay()
+        .serverConnectionOverlay(remoteDataType: "n")
     }
 }
 
@@ -243,7 +249,7 @@ struct RelayView: View {
             }
         }
         .refreshable { await store.loadRelays() }
-        .serverConnectionOverlay()
+        .serverConnectionOverlay(remoteDataType: "r")
     }
 }
 
@@ -282,7 +288,7 @@ struct MobileView: View {
             await store.loadMobile()
         }
         .refreshable { await store.loadMobile() }
-        .serverConnectionOverlay()
+        .serverConnectionOverlay(remoteDataType: "m")
     }
 }
 
@@ -419,6 +425,12 @@ struct SettingsView: View {
             Section("Diagnostics") {
                 LabeledContent("Notifications", value: store.notificationAuthorization)
                 LabeledContent("Network", value: store.networkPath)
+                LabeledContent("iPhone WiFi Network", value: store.wifiNetworkPrefix.isEmpty ? "--" : store.wifiNetworkPrefix)
+                LabeledContent("Service Host IP", value: store.serviceHostIPAddress.isEmpty ? "--" : store.serviceHostIPAddress)
+                LabeledContent("Service Network", value: store.isServiceURLOnWiFiNetwork ? "Matched" : "Not matched")
+                if !store.isServiceURLOnWiFiNetwork {
+                    LabeledContent("WiFi IP Address", value: store.wifiIPAddress)
+                }
                 if let lastUpdated = store.lastUpdated {
                     LabeledContent("Last Update", value: lastUpdated.formatted(date: .omitted, time: .standard))
                 }
@@ -432,20 +444,23 @@ struct SettingsView: View {
 }
 
 private extension View {
-    func serverConnectionOverlay() -> some View {
-        modifier(ServerConnectionOverlay())
+    func serverConnectionOverlay(remoteDataType: String? = nil) -> some View {
+        modifier(ServerConnectionOverlay(remoteDataType: remoteDataType))
     }
 }
 
 private struct ServerConnectionOverlay: ViewModifier {
     @EnvironmentObject private var store: AppStore
+    let remoteDataType: String?
 
     func body(content: Content) -> some View {
+        let shouldBlock = !store.canCommunicateWithServer || !store.hasReceivedRemoteData(for: remoteDataType)
+
         ZStack {
             content
-                .disabled(!store.canCommunicateWithServer)
+                .disabled(shouldBlock)
 
-            if !store.canCommunicateWithServer {
+            if shouldBlock {
                 Color.black.opacity(0.38)
                     .ignoresSafeArea()
 
@@ -457,6 +472,10 @@ private struct ServerConnectionOverlay: ViewModifier {
                     Text(statusText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(currentNetworkText)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }
                 .padding(24)
@@ -470,13 +489,39 @@ private struct ServerConnectionOverlay: ViewModifier {
         if store.deviceToken.isEmpty {
             return "Waiting for push token and Bluetooth LE discovery"
         }
-        if !store.isLocalNetworkAvailable {
-            return "Waiting for local network"
-        }
         if !store.hasServiceURL {
             return "Scanning Bluetooth LE for web-service URL"
         }
+        if !store.isLocalNetworkAvailable {
+            return "Waiting for local network"
+        }
+        if store.networkPath != "WiFi" {
+            return "Waiting for WiFi connection"
+        }
+        if !store.isServiceURLOnWiFiNetwork {
+            if store.wifiIPAddress.isEmpty {
+                return "Waiting for iPhone WiFi IP address"
+            }
+            if store.serviceHostIPAddress.isEmpty {
+                return "Waiting for IPv4 address in web-service URL"
+            }
+            guard var svcNet = NetworkInspector.ipv4HostAddress(from: store.serviceURL) else {
+                return "Web-service URL not known."
+            }
+            svcNet = NetworkInspector.privateNetworkPrefix(for: svcNet) ?? "unknown"
+            return "Your Smartphone must be in WiFi network \(svcNet)"
+        }
+        if !store.hasReceivedRemoteData(for: remoteDataType) {
+            return "Waiting for data from CarIOS"
+        }
         return "Waiting for server connection"
+    }
+
+    private var currentNetworkText: String {
+        if store.networkPath == "WiFi", !store.wifiNetworkPrefix.isEmpty {
+            return "Current network: \(store.wifiNetworkPrefix)"
+        }
+        return "Current network unknown."
     }
 }
 
@@ -499,7 +544,7 @@ struct NetworkStatusRow: View {
 struct ChargerRelayToggle: View {
     let title: String
     let value: JSONScalar?
-    let action: () -> Void
+    let action: (Bool) -> Void
 
     var body: some View {
         HStack {
@@ -507,14 +552,16 @@ struct ChargerRelayToggle: View {
                 .foregroundStyle(isOn ? .green : .secondary)
             Toggle(title, isOn: Binding(
                 get: { isOn },
-                set: { _ in action() }
+                set: { action($0) }
             ))
         }
     }
 
     private var isOn: Bool {
         guard let raw = value?.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return false }
-        return raw == "1" || raw == "true" || raw == "on"
+        if ["1", "true", "on", "yes"].contains(raw) { return true }
+        if ["0", "false", "off", "no"].contains(raw) { return false }
+        return (Double(raw) ?? 0) != 0
     }
 }
 

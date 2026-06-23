@@ -1,5 +1,6 @@
 import Combine
 import CoreBluetooth
+import Darwin
 import Foundation
 import Network
 import UserNotifications
@@ -12,6 +13,10 @@ final class AppStore: ObservableObject {
     @Published var notificationAuthorization: String = "Unknown"
     @Published var isLocalNetworkAvailable = false
     @Published var networkPath = "Unknown"
+    @Published var wifiIPAddress = ""
+    @Published var wifiNetworkPrefix = ""
+    @Published var serviceHostIPAddress = ""
+    @Published var isServiceURLOnWiFiNetwork = false
     @Published var bleState = "Idle"
     @Published var isBleConnected = false
     @Published var lastUpdated: Date?
@@ -23,6 +28,9 @@ final class AppStore: ObservableObject {
     @Published var mobile = MobileInfo()
     @Published var messages: [PushMessage] = []
     @Published var commandToggleStates: [ServiceCommand: Bool] = [:]
+    @Published private var pendingRelayStates: [Int: Bool] = [:]
+    @Published private var pendingChargerRelayStates: [Int: Bool] = [:]
+    @Published private var receivedRemoteData: [String: Date] = [:]
 
     private let client = CarIOSHTTPClient()
     private let history = MessageHistoryStore()
@@ -38,7 +46,20 @@ final class AppStore: ObservableObject {
     }
 
     var canCommunicateWithServer: Bool {
-        hasServiceURL && isLocalNetworkAvailable && !deviceToken.isEmpty
+        hasServiceURL && isLocalNetworkAvailable && isServiceURLOnWiFiNetwork && !deviceToken.isEmpty
+    }
+
+    func hasReceivedRemoteData(for type: String?) -> Bool {
+        guard let type else { return true }
+        return receivedRemoteData[type] != nil
+    }
+
+    func isRelayPending(index: Int) -> Bool {
+        pendingRelayStates[index] != nil
+    }
+
+    func isChargerRelayPending(mode: Int) -> Bool {
+        pendingChargerRelayStates[mode] != nil
     }
 
     func start() {
@@ -83,8 +104,11 @@ final class AppStore: ObservableObject {
         activePollType = type ?? ""
         if type == nil {
             stopPolling()
-        } else if pollingTask == nil {
-            startPolling()
+        } else {
+            receivedRemoteData.removeValue(forKey: activePollType)
+            if pollingTask == nil {
+                startPolling()
+            }
         }
     }
 
@@ -98,7 +122,6 @@ final class AppStore: ObservableObject {
         case "m": await loadMobile()
         default: break
         }
-        lastUpdated = Date()
     }
 
     func refreshAll() async {
@@ -108,7 +131,6 @@ final class AppStore: ObservableObject {
         await loadNetwork()
         await loadRelays()
         await loadMobile()
-        lastUpdated = Date()
     }
 
     func loadPower() async {
@@ -120,7 +142,9 @@ final class AppStore: ObservableObject {
                 solarPanels: data.double("p"),
                 engineKey: data.double("e")
             )
+            markRemoteDataReceived(type: "p")
         } catch {
+            markRemoteDataFailed(type: "p")
             lastError = error.localizedDescription
         }
     }
@@ -128,8 +152,20 @@ final class AppStore: ObservableObject {
     func loadCharger() async {
         do {
             let data = try await requestObject(type: "c")
-            charger = ChargerInfo(values: scalarMap(data))
+            var values = scalarMap(data)
+            for mode in [1, 2] {
+                let key = "sys.r\(mode)"
+                guard let desiredState = pendingChargerRelayStates[mode] else { continue }
+                if boolValue(values[key]) == desiredState {
+                    pendingChargerRelayStates.removeValue(forKey: mode)
+                } else {
+                    values[key] = JSONScalar(desiredState ? "1" : "0")
+                }
+            }
+            charger = ChargerInfo(values: values)
+            markRemoteDataReceived(type: "c")
         } catch {
+            markRemoteDataFailed(type: "c")
             lastError = error.localizedDescription
         }
     }
@@ -149,7 +185,9 @@ final class AppStore: ObservableObject {
             if !next.serviceUrl.isEmpty {
                 setServiceURL(next.serviceUrl)
             }
+            markRemoteDataReceived(type: "n")
         } catch {
+            markRemoteDataFailed(type: "n")
             lastError = error.localizedDescription
         }
     }
@@ -157,8 +195,22 @@ final class AppStore: ObservableObject {
     func loadRelays() async {
         do {
             let data = try await requestObject(type: "r")
-            relays = RelayInfo(states: (0..<8).map { data.bool("\($0)") })
+            var states = (0..<8).map { data.bool("\($0)") }
+            for (index, desiredState) in Array(pendingRelayStates) {
+                guard states.indices.contains(index) else {
+                    pendingRelayStates.removeValue(forKey: index)
+                    continue
+                }
+                if states[index] == desiredState {
+                    pendingRelayStates.removeValue(forKey: index)
+                } else {
+                    states[index] = desiredState
+                }
+            }
+            relays = RelayInfo(states: states)
+            markRemoteDataReceived(type: "r")
         } catch {
+            markRemoteDataFailed(type: "r")
             lastError = error.localizedDescription
         }
     }
@@ -167,7 +219,9 @@ final class AppStore: ObservableObject {
         do {
             let data = try await requestObject(type: "m")
             mobile = MobileInfo(values: scalarMap(data))
+            markRemoteDataReceived(type: "m")
         } catch {
+            markRemoteDataFailed(type: "m")
             lastError = error.localizedDescription
         }
     }
@@ -176,6 +230,8 @@ final class AppStore: ObservableObject {
         guard serviceURL != url else { return }
         serviceURL = url
         UserDefaults.standard.set(url, forKey: AppStorageKeys.serviceURL)
+        receivedRemoteData.removeAll()
+        updateServiceURLNetworkValidation()
         sendDeviceTokenOverBle()
     }
 
@@ -190,6 +246,7 @@ final class AppStore: ObservableObject {
     }
 
     func setRelay(index: Int, state: Bool) {
+        pendingRelayStates[index] = state
         relays.states[index] = state
         Task {
             await sendAction(type: "r", action: ["i": index, "s": state])
@@ -197,7 +254,9 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func toggleChargerRelay(mode: Int) {
+    func setChargerRelay(mode: Int, state: Bool) {
+        pendingChargerRelayStates[mode] = state
+        charger.values["sys.r\(mode)"] = JSONScalar(state ? "1" : "0")
         Task {
             await sendAction(type: "c", action: ["m": mode])
             await loadCharger()
@@ -222,7 +281,7 @@ final class AppStore: ObservableObject {
     }
 
     func registerDeviceTokenWithServer() {
-        guard !deviceToken.isEmpty, hasServiceURL, isLocalNetworkAvailable else { return }
+        guard canCommunicateWithServer else { return }
         Task {
             let _token = cariosapp.deviceToken(deviceToken)
             await sendAction(type: "s", action: ["t": "m", "c": "s", "d": _token])
@@ -273,7 +332,7 @@ final class AppStore: ObservableObject {
     }
 
     private func sendAction(type: String, action: [String: Any]) async {
-        guard hasServiceURL else { return }
+        guard canCommunicateWithServer else { return }
         do {
             let response = try await client.call(serviceURL: serviceURL, token: deviceToken, payload: ["v": "0787", "x": type, "a": action])
             if let code = response["c"] as? Int, code != 0 {
@@ -290,6 +349,24 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func boolValue(_ value: JSONScalar?) -> Bool? {
+        guard let raw = value?.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return nil }
+        if ["1", "true", "on", "yes"].contains(raw) { return true }
+        if ["0", "false", "off", "no"].contains(raw) { return false }
+        if let number = Double(raw) { return number != 0 }
+        return nil
+    }
+
+    private func markRemoteDataReceived(type: String) {
+        receivedRemoteData[type] = Date()
+        lastUpdated = Date()
+        lastError = nil
+    }
+
+    private func markRemoteDataFailed(type: String) {
+        receivedRemoteData.removeValue(forKey: type)
+    }
+
     private func startNetworkMonitor() {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
@@ -303,9 +380,108 @@ final class AppStore: ObservableObject {
                 } else {
                     self?.networkPath = "Offline"
                 }
+                self?.wifiIPAddress = NetworkInspector.localWiFiIPv4Address() ?? ""
+                self?.wifiNetworkPrefix = NetworkInspector.privateNetworkPrefix(for: self?.wifiIPAddress ?? "") ?? ""
+                self?.updateServiceURLNetworkValidation()
             }
         }
         pathMonitor.start(queue: pathQueue)
+    }
+
+    private func updateServiceURLNetworkValidation() {
+        let hostAddress = NetworkInspector.ipv4HostAddress(from: serviceURL) ?? ""
+        serviceHostIPAddress = hostAddress
+        isServiceURLOnWiFiNetwork = networkPath == "WiFi"
+            && NetworkInspector.sameIPv4Network(wifiIPAddress, hostAddress)
+    }
+}
+
+enum NetworkInspector {
+    static func localWiFiIPv4Address() -> String? {
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let firstInterface = interfaces else {
+            return nil
+        }
+        defer { freeifaddrs(interfaces) }
+
+        var interface = firstInterface
+        while true {
+            defer {
+                if let next = interface.pointee.ifa_next {
+                    interface = next
+                }
+            }
+
+            guard let addressPointer = interface.pointee.ifa_addr else {
+                guard interface.pointee.ifa_next != nil else {
+                    return nil
+                }
+                continue
+            }
+
+            let name = String(cString: interface.pointee.ifa_name)
+            let address = addressPointer.pointee
+            if name == "en0", address.sa_family == UInt8(AF_INET) {
+                var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                let result = getnameinfo(
+                    addressPointer,
+                    socklen_t(address.sa_len),
+                    &host,
+                    socklen_t(host.count),
+                    nil,
+                    0,
+                    NI_NUMERICHOST
+                )
+                if result == 0 {
+                    return String(cString: host)
+                }
+            }
+
+            guard interface.pointee.ifa_next != nil else {
+                return nil
+            }
+        }
+    }
+
+    static func ipv4HostAddress(from serviceURL: String) -> String? {
+        guard
+            let url = URL(string: serviceURL),
+            let host = url.host(percentEncoded: false),
+            ipv4Octets(host) != nil
+        else { return nil }
+        return host
+    }
+
+    static func sameIPv4Network(_ lhs: String, _ rhs: String) -> Bool {
+        guard
+            let lhsOctets = ipv4Octets(lhs),
+            let rhsOctets = ipv4Octets(rhs)
+        else { return false }
+        return lhsOctets.prefix(3).elementsEqual(rhsOctets.prefix(3))
+    }
+
+    static func privateNetworkPrefix(for address: String) -> String? {
+        guard let octets = ipv4Octets(address) else { return nil }
+        switch octets[0] {
+        case 10:
+            return "10.0.0.0/8"
+        case 172:
+            return "\(octets[0]).\(octets[1]).0.0/16"
+        case 192:
+            return "\(octets[0]).\(octets[1]).\(octets[2]).0/24"
+        default:
+            return nil
+        }
+    }
+
+    private static func ipv4Octets(_ value: String) -> [Int]? {
+        let parts = value.split(separator: ".")
+        guard parts.count == 4 else { return nil }
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
+            return nil
+        }
+        return octets
     }
 }
 
