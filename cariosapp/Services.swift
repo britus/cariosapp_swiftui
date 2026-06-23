@@ -405,7 +405,7 @@ enum CarIOSError: LocalizedError {
 func deviceToken(_ token: String) -> String {
     var _token = token
     #if DEBUG
-    _token = "868b761e2bde490b993e7ca76c42cb036fa149c23af119787276d443dce6cea9"
+    _token = "<sandbox>"
     #endif
     return _token
 }
