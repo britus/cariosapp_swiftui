@@ -27,6 +27,7 @@ final class AppStore: ObservableObject {
     @Published var relays = RelayInfo()
     @Published var mobile = MobileInfo()
     @Published var messages: [PushMessage] = []
+    @Published var requestedTab: AppTab?
     @Published var commandToggleStates: [ServiceCommand: Bool] = [:]
     @Published private var pendingRelayStates: [Int: Bool] = [:]
     @Published private var pendingChargerRelayStates: [Int: Bool] = [:]
@@ -54,6 +55,10 @@ final class AppStore: ObservableObject {
         return receivedRemoteData[type] != nil
     }
 
+    var unreadMessageCount: Int {
+        messages.filter { !$0.isRead }.count
+    }
+
     func isRelayPending(index: Int) -> Bool {
         pendingRelayStates[index] != nil
     }
@@ -66,6 +71,7 @@ final class AppStore: ObservableObject {
         guard !isStarted else { return }
         isStarted = true
         messages = history.load()
+        updateApplicationBadge()
         startNetworkMonitor()
         if bleScanEnabled {
             bleClient.start()
@@ -310,17 +316,38 @@ final class AppStore: ObservableObject {
             messages.insert(message, at: 0)
         }
         history.save(message)
+        updateApplicationBadge()
     }
 
     func markMessageRead(_ message: PushMessage) {
         guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
         messages[index].isRead = true
         history.save(messages[index])
+        updateApplicationBadge()
+    }
+
+    func deleteMessage(_ message: PushMessage) {
+        messages.removeAll { $0.id == message.id }
+        history.remove(message)
+        updateApplicationBadge()
     }
 
     func clearMessages() {
         messages.removeAll()
         history.removeAll()
+        updateApplicationBadge()
+    }
+
+    func openMessages() {
+        requestedTab = .messages
+    }
+
+    func finishOpenMessagesRequest() {
+        requestedTab = nil
+    }
+
+    private func updateApplicationBadge() {
+        UNUserNotificationCenter.current().setBadgeCount(unreadMessageCount)
     }
 
     private func requestObject(type: String) async throws -> [String: Any] {
@@ -863,6 +890,10 @@ final class MessageHistoryStore {
     func save(_ message: PushMessage) {
         guard let data = try? encoder.encode(message) else { return }
         UserDefaults.standard.set(data, forKey: AppStorageKeys.messagePrefix + message.id)
+    }
+
+    func remove(_ message: PushMessage) {
+        UserDefaults.standard.removeObject(forKey: AppStorageKeys.messagePrefix + message.id)
     }
 
     func removeAll() {

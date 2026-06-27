@@ -21,7 +21,12 @@ struct CarIOSSwiftUIApp: App {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    weak var store: AppStore?
+    weak var store: AppStore? {
+        didSet {
+            openMessagesIfNeeded()
+        }
+    }
+    private var shouldOpenMessages = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.isIdleTimerDisabled = true
@@ -88,6 +93,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let request = response.notification.request
         store?.addMessage(from: request.content, id: request.identifier, state: .received, actionId: response.actionIdentifier)
+        openMessagesFromNotification()
         completionHandler()
+    }
+
+    private func openMessagesFromNotification() {
+        shouldOpenMessages = true
+        DispatchQueue.main.async {
+            self.openMessagesIfNeeded()
+        }
+    }
+
+    private func openMessagesIfNeeded() {
+        guard shouldOpenMessages, let store else { return }
+        shouldOpenMessages = false
+        store.openMessages()
     }
 }

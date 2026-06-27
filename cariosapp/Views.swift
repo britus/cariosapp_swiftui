@@ -54,6 +54,8 @@ struct RootView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedTab: AppTab = .power
+    @State private var messagePath: [PushMessage] = []
+    @State private var messageDeleteConfirmation: MessageDeleteConfirmation?
 
     var body: some View {
         GeometryReader { proxy in
@@ -70,6 +72,11 @@ struct RootView: View {
         .onAppear { store.setActivePollType(selectedTab.pollType) }
         .onChange(of: selectedTab) { _, tab in
             store.setActivePollType(tab.pollType)
+        }
+        .onChange(of: store.requestedTab) { _, tab in
+            guard let tab else { return }
+            selectedTab = tab
+            store.finishOpenMessagesRequest()
         }
     }
 
@@ -89,9 +96,13 @@ struct RootView: View {
             }
             .navigationTitle("CarIOS")
         } detail: {
-            NavigationStack {
-                selectedTab.content
-                    .navigationTitle(selectedTab.title)
+            if selectedTab == .messages {
+                messagesNavigation
+            } else {
+                NavigationStack {
+                    selectedTab.content
+                        .navigationTitle(selectedTab.title)
+                }
             }
         }
     }
@@ -99,16 +110,116 @@ struct RootView: View {
     private var tabNavigation: some View {
         TabView(selection: $selectedTab) {
             ForEach(AppTab.allCases) { tab in
-                NavigationStack {
-                    tab.content
-                        .navigationTitle(tab.title)
-                }
+                tabNavigationStack(for: tab)
                 .tabItem {
                     Label(tab.title, systemImage: tab.icon)
                 }
+                .badge(tab == .messages ? store.unreadMessageCount : 0)
                 .tag(tab)
             }
         }
+    }
+
+    @ViewBuilder
+    private func tabNavigationStack(for tab: AppTab) -> some View {
+        if tab == .messages {
+            messagesNavigation
+        } else {
+            NavigationStack {
+                tab.content
+                    .navigationTitle(tab.title)
+            }
+        }
+    }
+
+    private var messagesNavigation: some View {
+        NavigationStack(path: $messagePath) {
+            MessageHistoryView(onDeleteRequest: requestMessageDeletion)
+                .navigationTitle(AppTab.messages.title)
+                .navigationDestination(for: PushMessage.self) { message in
+                    MessageDetailView(message: message)
+                        .onAppear { store.markMessageRead(message) }
+                }
+        }
+        .toolbar {
+            messageToolbarItems
+        }
+        .alert("Delete Messages?", isPresented: messageDeleteConfirmationBinding, presenting: messageDeleteConfirmation) { confirmation in
+            Button("Delete", role: .destructive) {
+                deleteMessages(confirmation)
+            }
+            Button("Cancel", role: .cancel) {
+                messageDeleteConfirmation = nil
+            }
+        } message: { confirmation in
+            switch confirmation {
+            case .all:
+                Text("All messages will be deleted.")
+            case .message:
+                Text("This message will be deleted.")
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var messageToolbarItems: some ToolbarContent {
+        if let message = messagePath.last {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    requestMessageDeletion(.message(message))
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .labelStyle(.iconOnly).padding(.leading, 4)
+                }
+                Button {
+                    closeMessageDetail()
+                } label: {
+                    Label("Done", systemImage: "xmark")
+                        .labelStyle(.iconOnly).padding(.trailing, 4)
+                }
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    requestMessageDeletion(.all)
+                } label: {
+                    Label("Clear", systemImage: "trash")
+                        .labelStyle(.iconOnly).padding(.horizontal, 8)
+                }
+                .disabled(store.messages.isEmpty)
+            }
+        }
+    }
+
+    private var messageDeleteConfirmationBinding: Binding<Bool> {
+        Binding {
+            messageDeleteConfirmation != nil
+        } set: { isPresented in
+            if !isPresented {
+                messageDeleteConfirmation = nil
+            }
+        }
+    }
+
+    private func requestMessageDeletion(_ confirmation: MessageDeleteConfirmation) {
+        messageDeleteConfirmation = confirmation
+    }
+
+    private func deleteMessages(_ confirmation: MessageDeleteConfirmation) {
+        switch confirmation {
+        case .all:
+            store.clearMessages()
+            messagePath.removeAll()
+        case .message(let message):
+            store.deleteMessage(message)
+            messagePath.removeAll { $0.id == message.id }
+        }
+        messageDeleteConfirmation = nil
+    }
+
+    private func closeMessageDetail() {
+        guard !messagePath.isEmpty else { return }
+        messagePath.removeLast()
     }
 }
 
@@ -121,7 +232,7 @@ extension AppTab {
         case .network: NetworkView()
         case .relays: RelayView()
         case .mobile: MobileView()
-        case .messages: MessageHistoryView()
+        case .messages: MessageHistoryView(onDeleteRequest: { _ in })
         case .commands: CommandView()
         case .settings: SettingsView()
         }
@@ -233,7 +344,7 @@ struct NetworkView: View {
 
 struct RelayView: View {
     @EnvironmentObject private var store: AppStore
-    private let names = ["Bed", "Trunk", "Front", "Radio", "Solar", "Relay 6", "Relay 7", "Relay 8"]
+    private let names = ["Bed", "Trunk", "Front", "Solar", "Radio", "Relay 6", "Relay 7", "Relay 8"]
 
     var body: some View {
         List {
@@ -294,6 +405,7 @@ struct MobileView: View {
 
 struct MessageHistoryView: View {
     @EnvironmentObject private var store: AppStore
+    let onDeleteRequest: (MessageDeleteConfirmation) -> Void
 
     var body: some View {
         List {
@@ -301,10 +413,7 @@ struct MessageHistoryView: View {
                 ContentUnavailableView("No Messages", systemImage: "bell.slash")
             } else {
                 ForEach(store.messages) { message in
-                    NavigationLink {
-                        MessageDetailView(message: message)
-                            .onAppear { store.markMessageRead(message) }
-                    } label: {
+                    NavigationLink(value: message) {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(message.title.isEmpty ? "CarIOS Message" : message.title)
@@ -324,11 +433,34 @@ struct MessageHistoryView: View {
                                 .foregroundStyle(.tertiary)
                         }
                     }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        deleteButton(for: message)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        deleteButton(for: message)
+                    }
                 }
             }
         }
-        .toolbar {
-            Button("Clear") { store.clearMessages() }
+    }
+
+    private func deleteButton(for message: PushMessage) -> some View {
+        Button(role: .destructive) {
+            onDeleteRequest(.message(message))
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+}
+
+enum MessageDeleteConfirmation: Identifiable {
+    case all
+    case message(PushMessage)
+
+    var id: String {
+        switch self {
+        case .all: "all"
+        case .message(let message): message.id
         }
     }
 }
@@ -361,7 +493,8 @@ struct MessageDetailView: View {
                 }
             }
         }
-        .navigationTitle("Message")
+        .navigationBarBackButtonHidden(true)
+        .navigationLinkIndicatorVisibility(.hidden)
     }
 }
 
