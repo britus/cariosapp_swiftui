@@ -1,17 +1,28 @@
 import SwiftUI
 
+/** Defines the primary navigation tabs available in the CarIOS app. */
 enum AppTab: String, CaseIterable, Identifiable {
+    /** Represents the power option. */
     case power
+    /** Represents the charger option. */
     case charger
+    /** Represents the network option. */
     case network
+    /** Represents the relays option. */
     case relays
+    /** Represents the mobile option. */
     case mobile
+    /** Represents the messages option. */
     case messages
+    /** Represents the commands option. */
     case commands
+    /** Represents the settings option. */
     case settings
 
+    /** Stable identifier used by SwiftUI collections and persisted models. */
     var id: String { rawValue }
 
+    /** User-facing title shown for this item. */
     var title: String {
         switch self {
         case .power: "Overview"
@@ -25,6 +36,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /** Service poll type associated with this tab, or nil when the tab does not poll. */
     var pollType: String? {
         switch self {
         case .power: "p"
@@ -36,6 +48,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /** SF Symbol name used for this tab in navigation UI. */
     var icon: String {
         switch self {
         case .power: "bolt.fill"
@@ -50,13 +63,19 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+/** Coordinates the app-level navigation and message detail routing. */
 struct RootView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /** Stores the selected tab value. */
     @State private var selectedTab: AppTab = .power
+    /** Stores the message path value. */
     @State private var messagePath: [PushMessage] = []
+    /** Stores the message delete confirmation value. */
     @State private var messageDeleteConfirmation: MessageDeleteConfirmation?
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         GeometryReader { proxy in
             let useSplitNavigation = horizontalSizeClass == .regular && proxy.size.width > proxy.size.height
@@ -80,6 +99,7 @@ struct RootView: View {
         }
     }
 
+    /** Navigation layout used on wide regular-width displays. */
     private var splitNavigation: some View {
         NavigationSplitView {
             List {
@@ -107,6 +127,7 @@ struct RootView: View {
         }
     }
 
+    /** Tab-based navigation layout used on compact displays. */
     private var tabNavigation: some View {
         TabView(selection: $selectedTab) {
             ForEach(AppTab.allCases) { tab in
@@ -121,6 +142,7 @@ struct RootView: View {
     }
 
     @ViewBuilder
+    /** Builds the navigation stack for a specific tab. */
     private func tabNavigationStack(for tab: AppTab) -> some View {
         if tab == .messages {
             messagesNavigation
@@ -132,6 +154,7 @@ struct RootView: View {
         }
     }
 
+    /** Navigation stack used for message history and detail screens. */
     private var messagesNavigation: some View {
         NavigationStack(path: $messagePath) {
             MessageHistoryView(onDeleteRequest: requestMessageDeletion)
@@ -162,6 +185,7 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder
+    /** Toolbar actions for deleting or closing message screens. */
     private var messageToolbarItems: some ToolbarContent {
         if let message = messagePath.last {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -191,6 +215,7 @@ struct RootView: View {
         }
     }
 
+    /** Boolean binding that presents and clears the delete confirmation alert. */
     private var messageDeleteConfirmationBinding: Binding<Bool> {
         Binding {
             messageDeleteConfirmation != nil
@@ -201,10 +226,12 @@ struct RootView: View {
         }
     }
 
+    /** Stores the deletion request so the confirmation alert can present it. */
     private func requestMessageDeletion(_ confirmation: MessageDeleteConfirmation) {
         messageDeleteConfirmation = confirmation
     }
 
+    /** Deletes the requested message scope and clears the confirmation state. */
     private func deleteMessages(_ confirmation: MessageDeleteConfirmation) {
         switch confirmation {
         case .all:
@@ -217,14 +244,17 @@ struct RootView: View {
         messageDeleteConfirmation = nil
     }
 
+    /** Pops the active message detail screen when one is visible. */
     private func closeMessageDetail() {
         guard !messagePath.isEmpty else { return }
         messagePath.removeLast()
     }
 }
 
+/** Adds CarIOS-specific behavior to AppTab. */
 extension AppTab {
     @ViewBuilder
+    /** SwiftUI content associated with this app tab. */
     var content: some View {
         switch self {
         case .power: PowerView()
@@ -239,9 +269,12 @@ extension AppTab {
     }
 }
 
+/** Shows the current power and voltage telemetry from the CarIOS service. */
 struct PowerView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             Section("Voltages") {
@@ -256,9 +289,12 @@ struct PowerView: View {
     }
 }
 
+/** Shows charger telemetry and exposes charger relay controls. */
 struct ChargerView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             Section("System") {
@@ -313,6 +349,7 @@ struct ChargerView: View {
         .serverConnectionOverlay(remoteDataType: "c")
     }
 
+    /** Converts a charger scalar field into a Double for gauge rendering. */
     private func double(_ key: String) -> Double? {
         guard let raw = store.charger.values[key]?.value
             .trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
@@ -320,9 +357,12 @@ struct ChargerView: View {
     }
 }
 
+/** Shows network status details and network maintenance actions. */
 struct NetworkView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         let wifiWanAvailable = NetworkStatusRow.isAvailableWAN(store.network.wifiWanIp)
         let mobileWanAvailable = NetworkStatusRow.isAvailableWAN(store.network.gsmWanIp)
@@ -350,10 +390,14 @@ struct NetworkView: View {
     }
 }
 
+/** Shows and controls the configured CarIOS relay outputs. */
 struct RelayView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the names value. */
     private let names = ["Bed K1", "Trunk K2", "Relay 3", "Boden K4", "Radio K5", "Relay 6", "Front Spot K7", "Back Spot K8"]
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             ForEach(Array(store.relays.states.enumerated()), id: \.offset) { index, state in
@@ -372,9 +416,12 @@ struct RelayView: View {
     }
 }
 
+/** Shows mobile modem and cellular network telemetry. */
 struct MobileView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             Section("Module") {
@@ -411,10 +458,14 @@ struct MobileView: View {
     }
 }
 
+/** Lists received push and data messages. */
 struct MessageHistoryView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the on delete request value. */
     let onDeleteRequest: (MessageDeleteConfirmation) -> Void
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             if store.messages.isEmpty {
@@ -452,6 +503,7 @@ struct MessageHistoryView: View {
         }
     }
 
+    /** Builds a destructive swipe action for a message row. */
     private func deleteButton(for message: PushMessage) -> some View {
         Button(role: .destructive) {
             onDeleteRequest(.message(message))
@@ -461,10 +513,14 @@ struct MessageHistoryView: View {
     }
 }
 
+/** Describes the pending message deletion action that needs user confirmation. */
 enum MessageDeleteConfirmation: Identifiable {
+    /** Deletes the complete message history. */
     case all
+    /** Deletes a single selected message. */
     case message(PushMessage)
 
+    /** Stable identifier used by SwiftUI collections and persisted models. */
     var id: String {
         switch self {
         case .all: "all"
@@ -473,9 +529,12 @@ enum MessageDeleteConfirmation: Identifiable {
     }
 }
 
+/** Shows the complete payload and metadata for a push message. */
 struct MessageDetailView: View {
+    /** Stores the message value. */
     let message: PushMessage
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             Section("Message") {
@@ -506,9 +565,12 @@ struct MessageDetailView: View {
     }
 }
 
+/** Exposes diagnostic and service commands for the CarIOS backend. */
 struct CommandView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
             Section("Service Commands") {
@@ -534,10 +596,14 @@ struct CommandView: View {
     }
 }
 
+/** Shows configuration, Bluetooth, notification, and diagnostic settings. */
 struct SettingsView: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the draft url value. */
     @State private var draftURL = ""
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         Form {
             Section("Web Service") {
@@ -584,16 +650,22 @@ struct SettingsView: View {
     }
 }
 
+/** Adds CarIOS-specific behavior to View. */
 private extension View {
+    /** Applies the connection-state overlay to a view. */
     func serverConnectionOverlay(remoteDataType: String? = nil) -> some View {
         modifier(ServerConnectionOverlay(remoteDataType: remoteDataType))
     }
 }
 
+/** Blocks interactive content while the app cannot reach the CarIOS service or required data is missing. */
 private struct ServerConnectionOverlay: ViewModifier {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the remote data type value. */
     let remoteDataType: String?
 
+    /** Performs the body operation. */
     func body(content: Content) -> some View {
         let shouldBlock = !store.canCommunicateWithServer || !store.hasReceivedRemoteData(for: remoteDataType)
 
@@ -626,6 +698,7 @@ private struct ServerConnectionOverlay: ViewModifier {
         }
     }
 
+    /** Human-readable explanation for the current connection-blocking state. */
     private var statusText: String {
         if store.deviceToken.isEmpty {
             return "Waiting for push token and Bluetooth LE discovery"
@@ -658,6 +731,7 @@ private struct ServerConnectionOverlay: ViewModifier {
         return "Waiting for server connection"
     }
 
+    /** Text describing the currently detected local network. */
     private var currentNetworkText: String {
         if store.networkPath == "WiFi", !store.wifiNetworkPrefix.isEmpty {
             return "Current network: \(store.wifiNetworkPrefix)"
@@ -666,27 +740,38 @@ private struct ServerConnectionOverlay: ViewModifier {
     }
 }
 
+/** Displays a network value with availability highlighting. */
 struct NetworkStatusRow: View {
+    /** User-facing title shown for this item. */
     let title: String
+    /** String-backed scalar value used for display and encoding. */
     let value: String
+    /** Stores the is available value. */
     let isAvailable: Bool
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         LabeledContent(title, value: value.isEmpty ? "--" : value)
             .listRowBackground(isAvailable ? Color.green.opacity(0.22) : Color.clear)
     }
 
+    /** Returns true when the WAN address represents an available interface. */
     static func isAvailableWAN(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed != "0.0.0.0"
     }
 }
 
+/** Displays a charger relay state and sends toggle changes back to the store. */
 struct ChargerRelayToggle: View {
+    /** User-facing title shown for this item. */
     let title: String
+    /** String-backed scalar value used for display and encoding. */
     let value: JSONScalar?
+    /** Stores the action value. */
     let action: (Bool) -> Void
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         HStack {
             Image(systemName: isOn ? "power.circle.fill" : "power.circle")
@@ -698,6 +783,7 @@ struct ChargerRelayToggle: View {
         }
     }
 
+    /** Boolean relay state derived from the raw scalar value. */
     private var isOn: Bool {
         guard let raw = value?.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return false }
         if ["1", "true", "on", "yes"].contains(raw) { return true }
@@ -706,9 +792,12 @@ struct ChargerRelayToggle: View {
     }
 }
 
+/** Displays compact connection and error status information. */
 struct StatusSection: View {
+    /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         Section("Status") {
             LabeledContent("Web Service", value: store.serviceURL.isEmpty ? "Not set" : store.serviceURL)
@@ -723,15 +812,22 @@ struct StatusSection: View {
     }
 }
 
+/** Displays a labeled numeric value together with a normalized progress indicator. */
 struct GaugeRow: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    /** User-facing title shown for this item. */
     let title: String
+    /** String-backed scalar value used for display and encoding. */
     let value: Double?
+    /** Stores the unit value. */
     let unit: String
+    /** Stores the system image value. */
     let systemImage: String
+    /** Stores the maximum value. */
     let maximum: Double
 
+    /** Creates a new instance with the supplied values. */
     init(title: String, value: Double?, unit: String, systemImage: String, maximum: Double = 15.0) {
         self.title = title
         self.value = value
@@ -740,6 +836,7 @@ struct GaugeRow: View {
         self.maximum = maximum
     }
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         if horizontalSizeClass == .compact {
             compactLayout
@@ -748,6 +845,7 @@ struct GaugeRow: View {
         }
     }
 
+    /** Layout optimized for compact horizontal size classes. */
     private var compactLayout: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -759,6 +857,7 @@ struct GaugeRow: View {
         }
     }
 
+    /** Layout optimized for regular horizontal size classes. */
     private var regularLayout: some View {
         HStack(alignment: .center, spacing: 16) {
             titleLabel
@@ -767,6 +866,7 @@ struct GaugeRow: View {
         }
     }
 
+    /** Label that combines the metric title with its SF Symbol. */
     private var titleLabel: some View {
         Label {
             Text(title)
@@ -777,10 +877,12 @@ struct GaugeRow: View {
         }
     }
 
+    /** Normalized progress indicator for the metric value. */
     private var progress: some View {
         ProgressView(value: min(Swift.max((value ?? 0) / maximum, 0), 1))
     }
 
+    /** Formatted value text shown beside the gauge. */
     private var valueText: some View {
         Text(formatted)
             .font(.headline.monospacedDigit())
@@ -789,6 +891,7 @@ struct GaugeRow: View {
             .layoutPriority(1)
     }
 
+    /** Display string for the numeric value and unit. */
     private var formatted: String {
         guard let value else { return "-- \(unit)" }
         let number = NumberFormatters.voltage.string(from: NSNumber(value: value)) ?? "\(value)"
@@ -796,10 +899,14 @@ struct GaugeRow: View {
     }
 }
 
+/** Displays key-value telemetry fields as labeled rows. */
 struct MetricGrid: View {
+    /** Stores the values value. */
     let values: [String: JSONScalar]
+    /** Stores the keys value. */
     let keys: [(String, String)]
 
+    /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         ForEach(keys, id: \.0) { key, title in
             LabeledContent(title, value: values[key]?.value ?? "--")
