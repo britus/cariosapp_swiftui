@@ -14,7 +14,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .power: "Power"
+        case .power: "Overview"
         case .charger: "Charger"
         case .network: "Network"
         case .relays: "Relays"
@@ -245,10 +245,10 @@ struct PowerView: View {
     var body: some View {
         List {
             Section("Voltages") {
-                GaugeRow(title: "Main Battery", value: store.power.mainBattery, unit: "V", systemImage: "battery.100")
-                GaugeRow(title: "Board Battery", value: store.power.boardBattery, unit: "V", systemImage: "cpu")
-                GaugeRow(title: "Solar Panels", value: store.power.solarPanels, unit: "V", systemImage: "sun.max")
-                GaugeRow(title: "Engine Key", value: store.power.engineKey, unit: "V", systemImage: "key")
+                GaugeRow(title: "Main Battery", value: store.power.mainBattery, unit: "V", systemImage: "battery.100", maximum: 15)
+                GaugeRow(title: "Board Battery", value: store.power.boardBattery, unit: "V", systemImage: "cpu", maximum: 15)
+                GaugeRow(title: "Solar Panels", value: store.power.solarPanels, unit: "V", systemImage: "sun.max", maximum: 24)
+                GaugeRow(title: "Engine Key", value: store.power.engineKey, unit: "V", systemImage: "key", maximum: 15)
             }
         }
         .refreshable { await store.refreshAll() }
@@ -262,29 +262,42 @@ struct ChargerView: View {
     var body: some View {
         List {
             Section("System") {
-                MetricGrid(values: store.charger.values, keys: [
-                    ("sys.cp", "Charge Power"),
-                    ("sys.bat.v", "Battery Voltage"),
-                    ("sys.bat.i", "Battery Current"),
-                    ("sys.bat.p", "Battery Power")
-                ])
                 ChargerRelayToggle(
-                    title: "Relay 1",
+                    title: "AC/DC Charger",
                     value: store.charger.values["sys.r1"]
                 ) { state in
                     store.setChargerRelay(mode: 1, state: state)
                 }
                 ChargerRelayToggle(
-                    title: "Relay 2",
+                    title: "DC/DC B2B Charger",
                     value: store.charger.values["sys.r2"]
                 ) { state in
                     store.setChargerRelay(mode: 2, state: state)
                 }
             }
+            Section("Battery") {
+                GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                GaugeRow(title: "Current", value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: "Power", value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: "Charge", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+            }
+            Section("Solar") {
+                GaugeRow(title: "Voltage", value: double("sol.v"), unit: "V", systemImage: "bolt.fill", maximum: 24)
+                GaugeRow(title: "Current", value: double("sol.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: "Power", value: double("sol.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+            }
+            Section("BMS") {
+                GaugeRow(title: "Voltage", value: double("bms.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                GaugeRow(title: "Current", value: double("bms.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: "Power", value: double("bms.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: "Capacity", value: double("bms.c"), unit: "%", systemImage: "bolt.circle.fill", maximum: 100)
+            }
             Section("AC/DC Charger") {
+                GaugeRow(title: "Voltage", value: double("acdc.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                GaugeRow(title: "Current", value: double("acdc.i"), unit: "A", systemImage: "gauge", maximum: 30)
                 MetricGrid(values: store.charger.values, keys: [
-                    ("acdc.v", "Voltage"),
-                    ("acdc.i", "Current"),
+                    /*("acdc.v", "Voltage"),
+                    ("acdc.i", "Current"),*/
                     ("acdc.t", "Temperature"),
                     ("acdc.s", "State"),
                     ("acdc.m", "Mode"),
@@ -295,20 +308,15 @@ struct ChargerView: View {
                     ("acdc.nm", "Network Mode")
                 ])
             }
-            Section("BMS / Solar") {
-                MetricGrid(values: store.charger.values, keys: [
-                    ("bms.v", "BMS Voltage"),
-                    ("bms.i", "BMS Current"),
-                    ("bms.p", "BMS Power"),
-                    ("bms.c", "Capacity"),
-                    ("sol.v", "Solar Voltage"),
-                    ("sol.i", "Solar Current"),
-                    ("sol.p", "Solar Power")
-                ])
-            }
-        }
+          }
         .refreshable { await store.loadCharger() }
         .serverConnectionOverlay(remoteDataType: "c")
+    }
+
+    private func double(_ key: String) -> Double? {
+        guard let raw = store.charger.values[key]?.value
+            .trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        return Double(raw)
     }
 }
 
@@ -344,7 +352,7 @@ struct NetworkView: View {
 
 struct RelayView: View {
     @EnvironmentObject private var store: AppStore
-    private let names = ["Bed", "Trunk", "Front", "Solar", "Radio", "Relay 6", "Relay 7", "Relay 8"]
+    private let names = ["Bed K1", "Trunk K2", "Relay 3", "Boden K4", "Radio K5", "Relay 6", "Front Spot K7", "Back Spot K8"]
 
     var body: some View {
         List {
@@ -722,6 +730,15 @@ struct GaugeRow: View {
     let value: Double?
     let unit: String
     let systemImage: String
+    let maximum: Double
+
+    init(title: String, value: Double?, unit: String, systemImage: String, maximum: Double = 15.0) {
+        self.title = title
+        self.value = value
+        self.unit = unit
+        self.systemImage = systemImage
+        self.maximum = maximum
+    }
 
     var body: some View {
         if horizontalSizeClass == .compact {
@@ -761,7 +778,7 @@ struct GaugeRow: View {
     }
 
     private var progress: some View {
-        ProgressView(value: min(max((value ?? 0) / 15.0, 0), 1))
+        ProgressView(value: min(Swift.max((value ?? 0) / maximum, 0), 1))
     }
 
     private var valueText: some View {
