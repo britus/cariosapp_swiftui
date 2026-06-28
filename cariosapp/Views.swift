@@ -871,7 +871,7 @@ struct GaugeRow: View {
     /** Label that combines the metric title with its SF Symbol. */
     private var titleLabel: some View {
         Label {
-            Text(title)
+            Text(title).frame(alignment: .leading)
         } icon: {
             Image(systemName: systemImage)
                 .imageScale(.large)
@@ -893,6 +893,7 @@ struct GaugeRow: View {
     /** Normalized progress indicator for the metric value. */
     private var progress: some View {
         ProgressView(value: min(Swift.max(normValue / maximum, 0), 1))
+            .frame(minWidth: 200, idealWidth: 250, maxWidth: .infinity, alignment: .leading)
     }
 
     /** Formatted value text shown beside the gauge. */
