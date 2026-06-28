@@ -321,6 +321,8 @@ struct ChargerView: View {
                 GaugeRow(title: "Voltage", value: double("sol.v"), unit: "V", systemImage: "bolt.fill", maximum: 24)
                 GaugeRow(title: "Current", value: double("sol.i"), unit: "A", systemImage: "gauge", maximum: 30)
                 GaugeRow(title: "Power", value: double("sol.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: "Load V", value: double("sol.load.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                GaugeRow(title: "Load I", value: double("sol.load.i"), unit: "A", systemImage: "bolt.circle.fill", maximum: 18)
             }
             Section("BMS") {
                 GaugeRow(title: "Voltage", value: double("bms.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
@@ -877,9 +879,20 @@ struct GaugeRow: View {
         }
     }
 
+    private var normValue: Double {
+        guard let v = value as Double? else {
+            return 0
+        }
+        if v < 0 {
+            return v * -1
+        } else {
+            return v
+        }
+    }
+
     /** Normalized progress indicator for the metric value. */
     private var progress: some View {
-        ProgressView(value: min(Swift.max((value ?? 0) / maximum, 0), 1))
+        ProgressView(value: min(Swift.max(normValue / maximum, 0), 1))
     }
 
     /** Formatted value text shown beside the gauge. */
