@@ -156,7 +156,7 @@ final class AppStore: ObservableObject {
         if type == nil {
             stopPolling()
         } else {
-            receivedRemoteData.removeValue(forKey: activePollType)
+            resetRemoteData(type: activePollType)
             if pollingTask == nil {
                 startPolling()
             }
@@ -165,7 +165,10 @@ final class AppStore: ObservableObject {
 
     /** Refreshes the service data associated with the active poll type. */
     func refreshActiveTab() async {
-        guard canCommunicateWithServer else { return }
+        guard canCommunicateWithServer else {
+            resetRemoteData(type: activePollType)
+            return
+        }
         switch activePollType {
         case "p": await loadPower()
         case "c": await loadCharger()
@@ -178,7 +181,10 @@ final class AppStore: ObservableObject {
 
     /** Refreshes all service data groups sequentially. */
     func refreshAll() async {
-        guard canCommunicateWithServer else { return }
+        guard canCommunicateWithServer else {
+            resetAllRemoteData()
+            return
+        }
         await loadPower()
         await loadCharger()
         await loadNetwork()
@@ -207,15 +213,11 @@ final class AppStore: ObservableObject {
     func loadCharger() async {
         do {
             let data = try await requestObject(type: "c")
-            var values = scalarMap(data)
+            let values = scalarMap(data)
             for mode in [1, 2] {
                 let key = "sys.r\(mode)"
-                guard let desiredState = pendingChargerRelayStates[mode] else { continue }
-                if boolValue(values[key]) == desiredState {
-                    pendingChargerRelayStates.removeValue(forKey: mode)
-                } else {
-                    values[key] = JSONScalar(desiredState ? "1" : "0")
-                }
+                guard pendingChargerRelayStates[mode] != nil, boolValue(values[key]) != nil else { continue }
+                pendingChargerRelayStates.removeValue(forKey: mode)
             }
             charger = ChargerInfo(values: values)
             markRemoteDataReceived(type: "c")
@@ -237,10 +239,10 @@ final class AppStore: ObservableObject {
                 gatewayIp: data.string("gatewayIp"),
                 serviceUrl: data.string("serviceUrl")
             )
-            network = next
             if !next.serviceUrl.isEmpty {
                 setServiceURL(next.serviceUrl)
             }
+            network = next
             markRemoteDataReceived(type: "n")
         } catch {
             markRemoteDataFailed(type: "n")
@@ -289,7 +291,7 @@ final class AppStore: ObservableObject {
         guard serviceURL != url else { return }
         serviceURL = url
         UserDefaults.standard.set(url, forKey: AppStorageKeys.serviceURL)
-        receivedRemoteData.removeAll()
+        resetAllRemoteData()
         updateServiceURLNetworkValidation()
         sendDeviceTokenOverBle()
     }
@@ -467,7 +469,34 @@ final class AppStore: ObservableObject {
 
     /** Clears the success marker for a failed remote data type. */
     private func markRemoteDataFailed(type: String) {
+        resetRemoteData(type: type)
+    }
+
+    /** Clears cached data for one service type so stale values are not shown as current. */
+    private func resetRemoteData(type: String) {
         receivedRemoteData.removeValue(forKey: type)
+        switch type {
+        case "p":
+            power = PowerInfo()
+        case "c":
+            pendingChargerRelayStates.removeAll()
+            charger = ChargerInfo()
+        case "n":
+            network = NetworkInfo()
+        case "r":
+            relays = RelayInfo()
+        case "m":
+            mobile = MobileInfo()
+        default:
+            break
+        }
+    }
+
+    /** Clears all cached service data after connectivity or endpoint changes. */
+    private func resetAllRemoteData() {
+        for type in ["p", "c", "n", "r", "m"] {
+            resetRemoteData(type: type)
+        }
     }
 
     /** Starts observing local network path and Wi-Fi address changes. */
@@ -487,6 +516,9 @@ final class AppStore: ObservableObject {
                 self?.wifiIPAddress = NetworkInspector.localWiFiIPv4Address() ?? ""
                 self?.wifiNetworkPrefix = NetworkInspector.privateNetworkPrefix(for: self?.wifiIPAddress ?? "") ?? ""
                 self?.updateServiceURLNetworkValidation()
+                if self?.canCommunicateWithServer == false {
+                    self?.resetAllRemoteData()
+                }
             }
         }
         pathMonitor.start(queue: pathQueue)
@@ -736,8 +768,8 @@ final class CarIOSHTTPClient {
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.httpMaximumConnectionsPerHost = 2
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 5 * 60
+        config.timeoutIntervalForRequest = 4
+        config.timeoutIntervalForResource = 8
         config.httpCookieAcceptPolicy = .never
         config.httpShouldSetCookies = false
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -761,6 +793,7 @@ final class CarIOSHTTPClient {
         request.setValue("CarIOSApp/1", forHTTPHeaderField: "User-Agent")
         request.setValue("1.00", forHTTPHeaderField: "X-CarIOSApp")
         request.networkServiceType = .callSignaling
+        request.timeoutInterval = 4
         request.httpShouldHandleCookies = false
         request.allowsCellularAccess = true
 

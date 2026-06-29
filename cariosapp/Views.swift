@@ -117,7 +117,7 @@ struct RootView: View {
             .navigationTitle("CarIOS")
         } detail: {
             if selectedTab == .messages {
-                messagesNavigation
+                messagesNavigation(usesSplitToolbar: true)
             } else {
                 NavigationStack {
                     selectedTab.content
@@ -145,7 +145,7 @@ struct RootView: View {
     /** Builds the navigation stack for a specific tab. */
     private func tabNavigationStack(for tab: AppTab) -> some View {
         if tab == .messages {
-            messagesNavigation
+            messagesNavigation(usesSplitToolbar: false)
         } else {
             NavigationStack {
                 tab.content
@@ -155,17 +155,31 @@ struct RootView: View {
     }
 
     /** Navigation stack used for message history and detail screens. */
-    private var messagesNavigation: some View {
+    private func messagesNavigation(usesSplitToolbar: Bool) -> some View {
         NavigationStack(path: $messagePath) {
             MessageHistoryView(onDeleteRequest: requestMessageDeletion)
                 .navigationTitle(AppTab.messages.title)
+                .toolbar {
+                    if usesSplitToolbar {
+                        messageHistoryToolbarItems
+                    }
+                }
                 .navigationDestination(for: PushMessage.self) { message in
                     MessageDetailView(message: message)
+                        .navigationTitle(message.title.isEmpty ? "Message" : message.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            if usesSplitToolbar {
+                                messageDetailToolbarItems(for: message)
+                            }
+                        }
                         .onAppear { store.markMessageRead(message) }
                 }
         }
         .toolbar {
-            messageToolbarItems
+            if !usesSplitToolbar {
+                messageToolbarItems
+            }
         }
         .alert("Delete Messages?", isPresented: messageDeleteConfirmationBinding, presenting: messageDeleteConfirmation) { confirmation in
             Button("Delete", role: .destructive) {
@@ -185,32 +199,51 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder
-    /** Toolbar actions for deleting or closing message screens. */
+    /** Main toolbar actions used by compact message navigation. */
     private var messageToolbarItems: some ToolbarContent {
         if let message = messagePath.last {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    requestMessageDeletion(.message(message))
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                        .labelStyle(.iconOnly).padding(.leading, 4)
-                }
-                Button {
-                    closeMessageDetail()
-                } label: {
-                    Label("Done", systemImage: "xmark")
-                        .labelStyle(.iconOnly).padding(.trailing, 4)
-                }
-            }
+            messageDetailToolbarItems(for: message)
         } else {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    requestMessageDeletion(.all)
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                        .labelStyle(.iconOnly).padding(.horizontal, 8)
-                }
-                .disabled(store.messages.isEmpty)
+            messageHistoryToolbarItems
+        }
+    }
+
+    @ToolbarContentBuilder
+    /** Toolbar action for clearing all messages from the message history. */
+    private var messageHistoryToolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                requestMessageDeletion(.all)
+            } label: {
+                Label("Clear", systemImage: "trash")
+                    .labelStyle(.iconOnly).padding(.horizontal, 8)
+            }
+            .disabled(store.messages.isEmpty)
+        }
+    }
+
+    @ToolbarContentBuilder
+    /** Toolbar actions for deleting or closing a message detail screen. */
+    private func messageDetailToolbarItems(for message: PushMessage) -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                closeMessageDetail()
+            } label: {
+                Label("Messages", systemImage: "chevron.left")
+            }
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                requestMessageDeletion(.message(message))
+            } label: {
+                Label("Delete", systemImage: "trash")
+                    .labelStyle(.iconOnly).padding(.leading, 4)
+            }
+            Button {
+                closeMessageDetail()
+            } label: {
+                Label("Done", systemImage: "xmark")
+                    .labelStyle(.iconOnly).padding(.trailing, 4)
             }
         }
     }
