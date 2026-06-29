@@ -124,7 +124,6 @@ final class AppStore: ObservableObject {
     func startPolling() {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
-            await self?.refreshActiveTab()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 await self?.refreshActiveTab()
