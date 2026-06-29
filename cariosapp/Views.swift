@@ -330,7 +330,7 @@ struct ChargerView: View {
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
-            Section("System") {
+            Section("System Control") {
                 ChargerRelayToggle(
                     title: "AC/DC Charger",
                     value: store.charger.values["sys.r1"]
@@ -344,7 +344,7 @@ struct ChargerView: View {
                     store.setChargerRelay(mode: 2, state: state)
                 }
             }
-            Section("Battery") {
+            Section("System Load") {
                 GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
                 GaugeRow(title: "Current", value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
                 GaugeRow(title: "Power", value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
