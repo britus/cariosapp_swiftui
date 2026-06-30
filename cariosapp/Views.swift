@@ -327,6 +327,18 @@ struct ChargerView: View {
     /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
 
+    private var slcTitle: String {
+        guard let v = double("sys.bat.i") else {
+            return "Current"
+        }
+        if v < 0 {
+            return "Supply Current"
+        } else if v > 0 {
+            return "Charge Current"
+        } else {
+            return "Current"
+        }
+    }
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
@@ -346,9 +358,11 @@ struct ChargerView: View {
             }
             Section("System Load") {
                 GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
-                GaugeRow(title: "Current", value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: slcTitle, value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
                 GaugeRow(title: "Power", value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
-                GaugeRow(title: "Charge", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                if (double("sys.cp") != 0) {
+                    GaugeRow(title: "Charger", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                }
             }
             Section("Solar") {
                 GaugeRow(title: "Voltage", value: double("sol.v"), unit: "V", systemImage: "bolt.fill", maximum: 24)
