@@ -339,6 +339,43 @@ struct ChargerView: View {
             return "Current"
         }
     }
+    private var slpTitle: String {
+        guard let v = double("sys.bat.p") else {
+            return "Power"
+        }
+        if v < 0 {
+            return "Supply Power"
+        } else if v > 0 {
+            return "Charge Power"
+        } else {
+            return "Current"
+        }
+    }
+    private var bmscTitle: String {
+        guard let v = double("bms.i") else {
+            return "Current"
+        }
+        if v < 0 {
+            return "Supply Current"
+        } else if v > 0 {
+            return "Charge Current"
+        } else {
+            return "Current"
+        }
+    }
+    private var bmspTitle: String {
+        guard let v = double("bms.p") else {
+            return "Power"
+        }
+        if v < 0 {
+            return "Supply Power"
+        } else if v > 0 {
+            return "Charge Power"
+        } else {
+            return "Current"
+        }
+    }
+
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
         List {
@@ -356,25 +393,25 @@ struct ChargerView: View {
                     store.setChargerRelay(mode: 2, state: state)
                 }
             }
-            Section("System Load") {
-                GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
-                GaugeRow(title: slcTitle, value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
-                GaugeRow(title: "Power", value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
-                if (double("sys.cp") != 0) {
-                    GaugeRow(title: "Charger", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
-                }
-            }
-            Section("Solar") {
+            Section("Solar Panels") {
                 GaugeRow(title: "Voltage", value: double("sol.v"), unit: "V", systemImage: "bolt.fill", maximum: 24)
                 GaugeRow(title: "Current", value: double("sol.i"), unit: "A", systemImage: "gauge", maximum: 30)
                 GaugeRow(title: "Power", value: double("sol.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 GaugeRow(title: "Load V", value: double("sol.load.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
                 GaugeRow(title: "Load I", value: double("sol.load.i"), unit: "A", systemImage: "bolt.circle.fill", maximum: 18)
             }
-            Section("BMS") {
+            Section("Board Battery") {
+                GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                GaugeRow(title: slcTitle, value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: slpTitle, value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                if (double("sys.cp") != 0) {
+                    GaugeRow(title: "Charger", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                }
+            }
+            Section("Battery Management System") {
                 GaugeRow(title: "Voltage", value: double("bms.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
-                GaugeRow(title: "Current", value: double("bms.i"), unit: "A", systemImage: "gauge", maximum: 30)
-                GaugeRow(title: "Power", value: double("bms.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: bmscTitle, value: double("bms.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                GaugeRow(title: bmspTitle, value: double("bms.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 GaugeRow(title: "Capacity", value: double("bms.c"), unit: "%", systemImage: "bolt.circle.fill", maximum: 100)
             }
             Section("AC/DC Charger") {
@@ -899,7 +936,7 @@ struct GaugeRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 titleLabel
-                Spacer(minLength: 12)
+                Spacer(minLength: 6)
                 valueText
             }
             progress
@@ -919,6 +956,7 @@ struct GaugeRow: View {
     private var titleLabel: some View {
         Label {
             Text(title).frame(alignment: .leading)
+                .font(Font.subheadline)
         } icon: {
             Image(systemName: systemImage)
                 .imageScale(.large)
