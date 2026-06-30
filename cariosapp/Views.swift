@@ -348,7 +348,7 @@ struct ChargerView: View {
         } else if v > 0 {
             return "Charge Power"
         } else {
-            return "Current"
+            return "Power"
         }
     }
     private var bmscTitle: String {
@@ -372,7 +372,7 @@ struct ChargerView: View {
         } else if v > 0 {
             return "Charge Power"
         } else {
-            return "Current"
+            return "Power"
         }
     }
 
