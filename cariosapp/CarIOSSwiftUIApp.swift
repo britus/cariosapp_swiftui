@@ -28,11 +28,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /** Stores the store value. */
     weak var store: AppStore? {
         didSet {
+            flushPendingMessages()
             openMessagesIfNeeded()
         }
     }
     /** Stores the should open messages value. */
     private var shouldOpenMessages = false
+    /** Stores notification messages received before SwiftUI attaches the store. */
+    private var pendingMessages: [PushMessage] = []
 
     /** Handles UIKit application lifecycle and notification delegate callbacks. */
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -96,22 +99,43 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     /** Handles UIKit application lifecycle and notification delegate callbacks. */
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        store?.addMessage(from: userInfo, state: .received, actionId: "background")
+        let message = PushMessage(id: UUID().uuidString, userInfo: userInfo, state: .received, actionId: "background")
+        addMessage(message)
         completionHandler(.newData)
     }
 
     /** Handles foreground presentation and user interaction for notifications. */
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        store?.addMessage(from: notification.request.content, id: notification.request.identifier, state: .willPresent, actionId: "*")
+        let message = PushMessage(id: notification.request.identifier, content: notification.request.content, state: .willPresent, actionId: "*")
+        addMessage(message)
         completionHandler([.banner, .list, .sound])
     }
 
     /** Handles foreground presentation and user interaction for notifications. */
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let request = response.notification.request
-        store?.addMessage(from: request.content, id: request.identifier, state: .received, actionId: response.actionIdentifier)
+        let message = PushMessage(id: request.identifier, content: request.content, state: .received, actionId: response.actionIdentifier)
+        addMessage(message)
         openMessagesFromNotification()
         completionHandler()
+    }
+
+    /** Adds the message immediately or defers it until the SwiftUI store is available. */
+    private func addMessage(_ message: PushMessage) {
+        guard let store else {
+            pendingMessages.removeAll { $0.id == message.id }
+            pendingMessages.insert(message, at: 0)
+            return
+        }
+        store.addMessage(message)
+    }
+
+    /** Persists notification messages that arrived during cold launch before the store existed. */
+    private func flushPendingMessages() {
+        guard let store, !pendingMessages.isEmpty else { return }
+        let messages = pendingMessages.reversed()
+        pendingMessages.removeAll()
+        messages.forEach { store.addMessage($0) }
     }
 
     /** Schedules navigation to messages after notification interaction. */
