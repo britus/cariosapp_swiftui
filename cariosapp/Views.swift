@@ -223,7 +223,7 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder
-    /** Toolbar actions for deleting or closing a message detail screen. */
+    /** Toolbar actions for deleting or closing alert message detail screen. */
     private func messageDetailToolbarItems(for message: PushMessage) -> some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             Button {
@@ -403,7 +403,7 @@ struct ChargerView: View {
             Section("Board Battery") {
                 GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
                 GaugeRow(title: slcTitle, value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
-                GaugeRow(title: slpTitle, value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: slpTitle, value: double("bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 if (double("sys.cp") != 0) {
                     GaugeRow(title: "Charger", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 }
@@ -414,21 +414,23 @@ struct ChargerView: View {
                 GaugeRow(title: bmspTitle, value: double("bms.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 GaugeRow(title: "Capacity", value: double("bms.c"), unit: "%", systemImage: "bolt.circle.fill", maximum: 100)
             }
-            Section("AC/DC Charger") {
-                GaugeRow(title: "Voltage", value: double("acdc.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
-                GaugeRow(title: "Current", value: double("acdc.i"), unit: "A", systemImage: "gauge", maximum: 30)
-                MetricGrid(values: store.charger.values, keys: [
-                    /*("acdc.v", "Voltage"),
-                    ("acdc.i", "Current"),*/
-                    ("acdc.t", "Temperature"),
-                    ("acdc.s", "State"),
-                    ("acdc.m", "Mode"),
-                    ("acdc.ls", "Link State"),
-                    ("acdc.cs", "Custom State"),
-                    ("acdc.ec", "Error Code"),
-                    ("acdc.rs", "Relay State"),
-                    ("acdc.nm", "Network Mode")
-                ])
+            if let v = double("acdc.v"), v > 0 {
+                Section("AC/DC Charger") {
+                    GaugeRow(title: "Voltage", value: double("acdc.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
+                    GaugeRow(title: "Current", value: double("acdc.i"), unit: "A", systemImage: "gauge", maximum: 30)
+                    MetricGrid(values: store.charger.values, keys: [
+                        /*("acdc.v", "Voltage"),
+                         ("acdc.i", "Current"),*/
+                        ("acdc.t", "Temperature"),
+                        ("acdc.s", "State"),
+                        ("acdc.m", "Mode"),
+                        ("acdc.ls", "Link State"),
+                        ("acdc.cs", "Custom State"),
+                        ("acdc.ec", "Error Code"),
+                        ("acdc.rs", "Relay State"),
+                        ("acdc.nm", "Network Mode")
+                    ])
+                }
             }
           }
         .refreshable { await store.loadCharger() }
@@ -447,6 +449,8 @@ struct ChargerView: View {
 struct NetworkView: View {
     /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the pending network command for confirmation. */
+    @State private var pendingNetworkCommand: NetworkCommand?
 
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
@@ -467,9 +471,27 @@ struct NetworkView: View {
             }
             Section("Actions") {
                 ForEach(NetworkCommand.allCases) { command in
-                    Button(command.title) { store.networkCommand(command) }
+                    Button(command.title) { 
+                        pendingNetworkCommand = command 
+                    }
                 }
             }
+        }
+        .confirmationDialog("Confirm Command", isPresented: Binding(
+            get: { pendingNetworkCommand != nil },
+            set: { if !$0 { pendingNetworkCommand = nil } }
+        ), titleVisibility: .visible) {
+            Button("Execute \(pendingNetworkCommand?.title ?? "")", role: .destructive) {
+                if let command = pendingNetworkCommand {
+                    store.networkCommand(command)
+                    pendingNetworkCommand = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingNetworkCommand = nil
+            }
+        } message: {
+            Text("Are you sure you want to execute '\(pendingNetworkCommand?.title ?? "")'?")
         }
         .refreshable { await store.loadNetwork() }
         .serverConnectionOverlay(remoteDataType: "n")
@@ -481,7 +503,7 @@ struct RelayView: View {
     /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
     /** Stores the names value. */
-    private let names = ["Bed K1", "Trunk K2", "Relay 3", "Boden K4", "Radio K5", "Relay 6", "Front Spot K7", "Back Spot K8"]
+    private let names = ["K1 Free", "K2 Free", "K3 Free", "K4 Free", "K5 Free", "K6 Free", "K7 Free", "K8 Free"]
 
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
@@ -559,7 +581,7 @@ struct MessageHistoryView: View {
             } else {
                 ForEach(store.messages) { message in
                     NavigationLink(value: message) {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment:.leading, spacing: 4) {
                             HStack {
                                 Text(message.title.isEmpty ? "CarIOS Message" : message.title)
                                     .font(.headline)
@@ -655,6 +677,8 @@ struct MessageDetailView: View {
 struct CommandView: View {
     /** Stores the store value. */
     @EnvironmentObject private var store: AppStore
+    /** Stores the pending network command for confirmation. */
+    @State private var pendingNetworkCommand: NetworkCommand?
 
     /** Builds the SwiftUI view hierarchy for this view or scene. */
     var body: some View {
@@ -666,7 +690,9 @@ struct CommandView: View {
             }
             Section("Network Commands") {
                 ForEach(NetworkCommand.allCases) { command in
-                    Button(command.title) { store.networkCommand(command) }
+                    Button(command.title) { 
+                        pendingNetworkCommand = command 
+                    }
                 }
             }
             Section("Server Traces") {
@@ -677,6 +703,22 @@ struct CommandView: View {
                     ))
                 }
             }
+        }
+        .confirmationDialog("Confirm Command", isPresented: Binding(
+            get: { pendingNetworkCommand != nil },
+            set: { if !$0 { pendingNetworkCommand = nil } }
+        ), titleVisibility: .visible) {
+            Button("Execute \(pendingNetworkCommand?.title ?? "")", role: .destructive) {
+                if let command = pendingNetworkCommand {
+                    store.networkCommand(command)
+                    pendingNetworkCommand = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingNetworkCommand = nil
+            }
+        } message: {
+            Text("Are you sure you want to execute '\(pendingNetworkCommand?.title ?? "")'?")
         }
         .serverConnectionOverlay()
     }
@@ -852,7 +894,7 @@ struct NetworkStatusRow: View {
 struct ChargerRelayToggle: View {
     /** User-facing title shown for this item. */
     let title: String
-    /** String-backed scalar value used for display and encoding. */
+    /** Stores the value value. */
     let value: JSONScalar?
     /** Stores the action value. */
     let action: (Bool) -> Void
@@ -890,9 +932,7 @@ struct StatusSection: View {
             LabeledContent("Local Network", value: store.isLocalNetworkAvailable ? store.networkPath : "Offline")
             LabeledContent("Bluetooth", value: store.bleState)
             if let lastError = store.lastError {
-                Text(lastError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+                Text(lastError).foregroundStyle(.red)
             }
         }
     }
@@ -904,7 +944,7 @@ struct GaugeRow: View {
 
     /** User-facing title shown for this item. */
     let title: String
-    /** String-backed scalar value used for display and encoding. */
+    /** Stores the value value. */
     let value: Double?
     /** Stores the unit value. */
     let unit: String
