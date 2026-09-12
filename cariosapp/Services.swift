@@ -3,7 +3,18 @@ import CoreBluetooth
 import Darwin
 import Foundation
 import Network
+import UIKit
 import UserNotifications
+
+/** Describes a pending request to switch to the Wi-Fi network required by a BLE-discovered service URL. */
+struct WiFiSwitchRequest: Identifiable {
+    /** Stable identifier used by SwiftUI collections. */
+    let id = UUID()
+    /** Service URL discovered over Bluetooth LE. */
+    let serviceURL: String
+    /** Human-readable target network description. */
+    let targetNetwork: String
+}
 
 @MainActor
 /** Owns app state, service communication, BLE discovery, polling, and message persistence. */
@@ -28,6 +39,8 @@ final class AppStore: ObservableObject {
     @Published var serviceHostIPAddress = ""
     /** Whether the service host appears to be on the current Wi-Fi subnet. */
     @Published var isServiceURLOnWiFiNetwork = false
+    /** Pending request to switch Wi-Fi networks after BLE URL discovery. */
+    @Published var pendingWiFiSwitchRequest: WiFiSwitchRequest?
     /** Current Bluetooth LE connection or scanning state. */
     @Published var bleState = "Idle"
     /** Whether BLE is currently considered connected and ready. */
@@ -531,6 +544,20 @@ final class AppStore: ObservableObject {
         isServiceURLOnWiFiNetwork = networkPath == "WiFi"
             && NetworkInspector.sameIPv4Network(wifiIPAddress, hostAddress)
     }
+
+    /** Checks whether a BLE-discovered service URL is on the current Wi-Fi network and queues a switch request. */
+    private func evaluateWiFiNetworkSwitchAfterBLE() {
+        guard networkPath == "WiFi",
+              !serviceURL.isEmpty,
+              let hostAddress = NetworkInspector.ipv4HostAddress(from: serviceURL),
+              !wifiIPAddress.isEmpty,
+              !NetworkInspector.sameIPv4Network(wifiIPAddress, hostAddress) else {
+            pendingWiFiSwitchRequest = nil
+            return
+        }
+        let targetNetwork = NetworkInspector.privateNetworkPrefix(for: hostAddress) ?? hostAddress
+        pendingWiFiSwitchRequest = WiFiSwitchRequest(serviceURL: serviceURL, targetNetwork: targetNetwork)
+    }
 }
 
 /** Provides IPv4 network inspection helpers for validating local service reachability. */
@@ -642,6 +669,7 @@ extension AppStore: CarIOSBLEClientDelegate {
     nonisolated func bleClientDidReceive(serviceURL: String) {
         Task { @MainActor in
             self.setServiceURL(serviceURL)
+            self.evaluateWiFiNetworkSwitchAfterBLE()
         }
     }
 
@@ -659,6 +687,39 @@ extension AppStore: CarIOSBLEClientDelegate {
         Task { @MainActor in
             self.lastError = error.localizedDescription
         }
+    }
+}
+
+/** Adds settings-launch helpers to AppStore. */
+extension AppStore {
+    /** Opens the iOS Wi-Fi settings, falling back to the app's settings page. */
+    static func openWiFiSettings() {
+        let wifiURLStrings = ["App-Prefs:", "App-Prefs:root=WIFI", "prefs:root=WIFI"]
+        let fallbackURL = URL(string: UIApplication.openSettingsURLString)
+
+        func attempt(at index: Int) {
+            guard index < wifiURLStrings.count else {
+                if let fallbackURL {
+                    print("fallback \(index) \(fallbackURL)")
+                    UIApplication.shared.open(fallbackURL)
+                }
+                return
+            }
+            print("index \(index) \(wifiURLStrings[index])")
+            guard let url = URL(string: wifiURLStrings[index]) else {
+                attempt(at: index + 1)
+                return
+            }
+            UIApplication.shared.open(url, options: [:]) { opened in
+                if !opened {
+                    DispatchQueue.main.async {
+                        attempt(at: index + 1)
+                    }
+                }
+            }
+        }
+
+        attempt(at: 0)
     }
 }
 

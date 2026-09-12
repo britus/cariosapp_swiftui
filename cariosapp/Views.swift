@@ -97,6 +97,24 @@ struct RootView: View {
             selectedTab = tab
             store.finishOpenMessagesRequest()
         }
+        .alert("Switch Wi-Fi Network?", isPresented: Binding(
+            get: { store.pendingWiFiSwitchRequest != nil },
+            set: { if !$0 { /* nothing here */ } },
+        ), presenting: store.pendingWiFiSwitchRequest) { request in
+            Button("Open Wi-Fi Settings") {
+                AppStore.openWiFiSettings()
+                Task { @MainActor in
+                    store.pendingWiFiSwitchRequest = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                Task { @MainActor in
+                    store.pendingWiFiSwitchRequest = nil
+                }
+            }
+        } message: { request in
+            Text("The discovered CarIOS service is on Wi-Fi network \(request.targetNetwork). Open Settings to switch networks.")
+        }
     }
 
     /** Navigation layout used on wide regular-width displays. */
@@ -403,7 +421,7 @@ struct ChargerView: View {
             Section("Board Battery") {
                 GaugeRow(title: "Voltage", value: double("sys.bat.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
                 GaugeRow(title: slcTitle, value: double("sys.bat.i"), unit: "A", systemImage: "gauge", maximum: 30)
-                GaugeRow(title: slpTitle, value: double("bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
+                GaugeRow(title: slpTitle, value: double("sys.bat.p"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 if (double("sys.cp") != 0) {
                     GaugeRow(title: "Charger", value: double("sys.cp"), unit: "W", systemImage: "bolt.circle.fill", maximum: 1500)
                 }
@@ -419,8 +437,8 @@ struct ChargerView: View {
                     GaugeRow(title: "Voltage", value: double("acdc.v"), unit: "V", systemImage: "bolt.fill", maximum: 15)
                     GaugeRow(title: "Current", value: double("acdc.i"), unit: "A", systemImage: "gauge", maximum: 30)
                     MetricGrid(values: store.charger.values, keys: [
-                        /*("acdc.v", "Voltage"),
-                         ("acdc.i", "Current"),*/
+                        //("acdc.v", "Voltage"),
+                        // ("acdc.i", "Current"),
                         ("acdc.t", "Temperature"),
                         ("acdc.s", "State"),
                         ("acdc.m", "Mode"),
@@ -851,6 +869,11 @@ private struct ServerConnectionOverlay: ViewModifier {
                 return "Web-service URL not known."
             }
             svcNet = NetworkInspector.privateNetworkPrefix(for: svcNet) ?? "unknown"
+            Task {
+                store.pendingWiFiSwitchRequest = WiFiSwitchRequest(
+                    serviceURL: store.serviceHostIPAddress,
+                    targetNetwork: svcNet)
+            }
             return "Your Smartphone must be in WiFi network \(svcNet)"
         }
         if !store.hasReceivedRemoteData(for: remoteDataType) {
